@@ -5,11 +5,10 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 
 from orders.models.order import Order
-from orders.serializers.order_serializer import OrderSerializer
 from orders.models.order_item import OrderItem
-from orders.serializers.order_item_serializer import OrderItemSerializer
 from orders.models.payment import Payment
-from orders.serializers.payment_serializer import PaymentSerializer
+from products.models.product import Product
+from orders.serializers.order_serializer import OrderSerializer
 
 class OrdersList(APIView):
     def get(self, request):
@@ -19,11 +18,39 @@ class OrdersList(APIView):
 
 class OrdersCreate(APIView):
     def post(self, request):
-        serializer = OrderSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        payload = request.data.copy()
+        
+        order = Order.objects.create(
+            shipping_address=payload['shipping_address'],
+            total=0
+        )
+        order.save()
+
+        for product in payload['products']:
+            productObject = get_object_or_404(Product, pk=product['product_id'])
+            orderItemPrice = productObject.price * product['quantity']
+
+            order_item = OrderItem.objects.create(
+                order_id=order,
+                product_id=productObject,
+                quantity=product['quantity'],
+                price=orderItemPrice
+            )
+            order_item.save()
+
+            order.total += orderItemPrice
+        
+        order.save()
+        
+        payment = Payment.objects.create(
+            order_id=order,
+            payment_method=payload['payment_method'],
+            amount=order.total
+        )
+        payment.save()
+
+        serializer = OrderSerializer(order)
+        return Response(serializer.data)
 
 class OrdersDelete(APIView):
     def delete(self, request, order_id):
